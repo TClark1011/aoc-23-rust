@@ -1,4 +1,5 @@
 use regex::Regex;
+use std::cmp;
 
 advent_of_code::solution!(2);
 
@@ -51,6 +52,49 @@ fn cube_game_is_within_rules(game: &CubeGame, game_rules: &[GameMaxCubeRule; 3])
             }
         })
     })
+}
+
+enum GetCubeGameMinimumColorCubeCountError {
+    CouldNotFindMinimumForColor,
+}
+
+fn get_cube_game_minimum_color_cube_count(
+    color: CubeColor,
+    game: &CubeGame,
+) -> Result<u32, GetCubeGameMinimumColorCubeCountError> {
+    let minimum_required_cubes_opt: Option<u32> = game
+        .reveals
+        .iter()
+        .flat_map(|inner_vec| inner_vec.iter())
+        .fold(None, |current_max_cubes_opt, reveal| {
+            match (current_max_cubes_opt, reveal.color == color) {
+                (Some(current_max_cubes), true) => Some(cmp::max(current_max_cubes, reveal.amount)),
+                (None, true) => Some(reveal.amount),
+                _ => current_max_cubes_opt,
+            }
+        });
+
+    match minimum_required_cubes_opt {
+        Some(minimum_required_cubes) => Ok(minimum_required_cubes),
+        _ => Err(GetCubeGameMinimumColorCubeCountError::CouldNotFindMinimumForColor),
+    }
+}
+
+enum GetCubeGamePowerError {
+    CouldNotFindAllColors,
+}
+
+fn get_cube_game_power(game: &CubeGame) -> Result<u32, GetCubeGamePowerError> {
+    let red_min_cubes_res = get_cube_game_minimum_color_cube_count(CubeColor::Red, game);
+    let green_min_cubes_res = get_cube_game_minimum_color_cube_count(CubeColor::Green, game);
+    let blue_min_cubes_res = get_cube_game_minimum_color_cube_count(CubeColor::Blue, game);
+
+    match (red_min_cubes_res, green_min_cubes_res, blue_min_cubes_res) {
+        (Ok(red_min_cubes), Ok(green_min_cubes), Ok(blue_min_cubes)) => {
+            Ok(red_min_cubes * green_min_cubes * blue_min_cubes)
+        }
+        _ => Err(GetCubeGamePowerError::CouldNotFindAllColors),
+    }
 }
 
 fn get_line_game_id(line: &str) -> Option<u32> {
@@ -166,7 +210,20 @@ pub fn part_one(input: &str) -> Option<u32> {
 }
 
 pub fn part_two(input: &str) -> Option<u32> {
-    None
+    let lines = input.lines().collect::<Vec<_>>();
+    let games: Vec<CubeGame> = lines
+        .iter()
+        .map(|line| get_cube_game_from_line(line).unwrap())
+        .collect();
+
+    let game_powers: Vec<u32> = games
+        .iter()
+        .filter_map(|game| get_cube_game_power(game).ok())
+        .collect();
+
+    let game_powers_sum: u32 = game_powers.iter().fold(0, |sum, power| sum + power);
+
+    Some(game_powers_sum)
 }
 
 #[cfg(test)]
@@ -182,6 +239,6 @@ mod tests {
     #[test]
     fn test_part_two() {
         let result = part_two(&advent_of_code::template::read_file("examples", DAY));
-        assert_eq!(result, None);
+        assert_eq!(result, Some(2286));
     }
 }
