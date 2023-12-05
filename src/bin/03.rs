@@ -1,5 +1,4 @@
 use regex::Regex;
-use std::num;
 
 advent_of_code::solution!(3);
 
@@ -11,9 +10,11 @@ fn diff_is_within(a: i32, b: i32, diff_limit: i32) -> bool {
     (a.abs() - b.abs()).abs() <= diff_limit
 }
 
+#[derive(PartialEq, Clone)]
 enum SchematicContent {
     Number(u32),
     Symbol(String),
+    Gear,
 }
 
 struct SchematicPiece {
@@ -66,33 +67,29 @@ impl Schematic {
         let schematic_pieces: Vec<SchematicPiece> = lines
             .iter()
             .map(|line| {
-                (
-                    line,
-                    Regex::new("([0-9]+)|([^.])")
-                        .unwrap()
-                        .find_iter(line)
-                        .map(|a_match| (a_match.start(), a_match.as_str()))
-                        .collect::<Vec<(usize, &str)>>(),
-                )
+                Regex::new("([0-9]+)|([^.])")
+                    .unwrap()
+                    .find_iter(line)
+                    .map(|a_match| (a_match.start(), a_match.as_str()))
+                    .collect::<Vec<(usize, &str)>>()
             })
             .enumerate()
-            .map(|(row_index, (line, line_segments))| {
+            .map(|(row_index, line_segments)| {
                 line_segments
                     .iter()
-                    .map(
-                        |(first_character_column_index, segment)| match segment.parse::<u32>() {
-                            Ok(num) => SchematicPiece {
-                                content: SchematicContent::Number(num),
-                                row_index: row_index,
-                                first_character_column_index: first_character_column_index.clone(),
-                            },
-                            Err(_) => SchematicPiece {
-                                content: SchematicContent::Symbol(segment.to_string()),
-                                row_index: row_index,
-                                first_character_column_index: first_character_column_index.clone(),
-                            },
-                        },
-                    )
+                    .map(|(first_character_column_index, segment)| {
+                        let piece_type = match (segment, segment.parse::<u32>()) {
+                            (&"*", _) => SchematicContent::Gear,
+                            (_, Ok(num)) => SchematicContent::Number(num),
+                            (_, Err(_)) => SchematicContent::Symbol(segment.to_string()),
+                        };
+
+                        SchematicPiece {
+                            content: piece_type,
+                            row_index: row_index,
+                            first_character_column_index: first_character_column_index.clone(),
+                        }
+                    })
                     .collect()
             })
             .flat_map(|a: Vec<SchematicPiece>| a)
@@ -132,9 +129,9 @@ impl Schematic {
 pub fn part_one(input: &str) -> Option<u32> {
     let schematic = Schematic::from_lines(input.lines().collect());
 
-    let valid_number_pieces = schematic.get_valid_number_pieces();
+    let number_part_pieces = schematic.get_valid_number_pieces();
 
-    let sum_of_part_numbers = valid_number_pieces.iter().fold(0, |sum, piece| {
+    let sum_of_part_numbers = number_part_pieces.iter().fold(0, |sum, piece| {
         sum + match piece.content {
             SchematicContent::Number(num) => num,
             _ => 0,
@@ -145,7 +142,46 @@ pub fn part_one(input: &str) -> Option<u32> {
 }
 
 pub fn part_two(input: &str) -> Option<u32> {
-    None
+    let schematic = Schematic::from_lines(input.lines().collect());
+
+    let number_part_pieces = schematic.get_valid_number_pieces();
+
+    let gear_ratios: Vec<u32> = schematic
+        .pieces
+        .iter()
+        .filter(|piece| piece.content == SchematicContent::Gear)
+        .filter_map(|gear_piece| {
+            let adjacent_number_parts = number_part_pieces
+                .iter()
+                .filter(|number_part_piece| number_part_piece.is_adjacent_to(gear_piece))
+                .collect::<Vec<&&SchematicPiece>>();
+
+            if adjacent_number_parts.len() == 2 {
+                return Some(adjacent_number_parts.iter().fold(0, |sum, part| {
+                    match (sum, part.content.clone()) {
+                        (0, SchematicContent::Number(num)) => num,
+                        (non_zero_sum, SchematicContent::Number(num)) => non_zero_sum * num,
+                        _ => 0,
+                    }
+                }));
+            }
+
+            None
+        })
+        .collect();
+
+    let gear_ratios_sum = gear_ratios
+        .iter()
+        .fold(0, |sum, gear_ratio| sum + gear_ratio);
+
+    // let sum_of_part_numbers = number_part_pieces.iter().fold(0, |sum, piece| {
+    //     sum + match piece.content {
+    //         SchematicContent::Number(num) => num,
+    //         _ => 0,
+    //     }
+    // });
+
+    Some(gear_ratios_sum)
 }
 
 #[cfg(test)]
@@ -161,6 +197,6 @@ mod tests {
     #[test]
     fn test_part_two() {
         let result = part_two(&advent_of_code::template::read_file("examples", DAY));
-        assert_eq!(result, None);
+        assert_eq!(result, Some(467835));
     }
 }
