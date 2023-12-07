@@ -1,19 +1,91 @@
-use std::collections::HashMap;
-
 use regex::Regex;
 
 #[path = "../utils.rs"]
 mod utils;
 
-advent_of_code::solution!(5);
-
-struct ResourceMap {
-    destination_range_start: u32,
-    source_range_start: u32,
-    range_length: u32,
+#[derive(Copy, Clone)]
+struct SeedRange {
+    start: u64,
+    length: u64,
 }
 
-impl ResourceMap {
+impl SeedRange {
+    fn get_end(&self) -> u64 {
+        self.start + self.length - 1
+    }
+
+    fn subtract(&self, other_range: SeedRange) -> Option<SeedRange> {
+        let self_end = self.get_end();
+        let other_range_end = other_range.get_end();
+
+        let there_is_no_overlap = self_end < other_range.start || self.start > other_range_end;
+
+        if there_is_no_overlap {
+            return Some(self.clone());
+        }
+
+        let overlap_start = self.start.max(other_range.start);
+        let overlap_end = self_end.min(other_range_end);
+        let overlap_length = overlap_end - overlap_start + 1;
+
+        let self_is_entirely_within_other = self.length == overlap_length;
+        if self_is_entirely_within_other {
+            return None;
+        }
+
+        let self_starts_first = self.start < other_range.start;
+
+        let new_range_start = if self_starts_first {
+            self.start
+        } else {
+            other_range_end + 1
+        };
+        let new_range_end = if self_starts_first {
+            other_range.start - 1
+        } else {
+            self_end
+        };
+
+        let new_range_length = new_range_end - new_range_start + 1;
+
+        return Some(SeedRange {
+            start: new_range_start,
+            length: new_range_length,
+        });
+    }
+}
+
+advent_of_code::solution!(5);
+
+struct SeedMap {
+    destination_start: u64,
+    source_start: u64,
+    range_length: u64,
+}
+
+enum MapProcessSeedRangeOutput {
+    NoOverlap,
+    CompleteOverlap(SeedRange),
+    // First range is the shifted range, second
+    // is the unaffected remainder
+    PartialOverlap(SeedRange, SeedRange),
+}
+
+impl SeedMap {
+    fn apply_delta(&self, subject: u64) -> u64 {
+        let abs_delta = self.destination_start.abs_diff(self.source_start);
+
+        if self.source_start < self.destination_start {
+            return subject + abs_delta;
+        }
+
+        return subject - abs_delta;
+    }
+
+    fn get_source_end(&self) -> u64 {
+        self.source_start + self.range_length - 1
+    }
+
     fn from_line(line: &str) -> Option<Self> {
         let resource_map_line_pattern =
             Regex::new("^([0-9]+)\\s+([0-9]+)\\s+([0-9]+)").expect("Invalid Regex");
@@ -21,54 +93,123 @@ impl ResourceMap {
         let captures_opt = resource_map_line_pattern.captures(line);
 
         match captures_opt {
-            Some(captures) => Some(ResourceMap {
-                destination_range_start: captures.get(1).unwrap().as_str().parse::<u32>().unwrap(),
-                source_range_start: captures.get(2).unwrap().as_str().parse::<u32>().unwrap(),
-                range_length: captures.get(3).unwrap().as_str().parse::<u32>().unwrap(),
+            Some(captures) => Some(SeedMap {
+                destination_start: captures.get(1).unwrap().as_str().parse::<u64>().unwrap(),
+                source_start: captures.get(2).unwrap().as_str().parse::<u64>().unwrap(),
+                range_length: captures.get(3).unwrap().as_str().parse::<u64>().unwrap(),
             }),
             _ => None,
         }
     }
 
-    fn number_is_within_range(&self, target: u32) -> bool {
-        match self.source_range_start.checked_add(self.range_length - 1) {
-            Some(end_of_mapping) => target >= self.source_range_start && target <= end_of_mapping,
+    fn number_is_within_range(&self, target: u64) -> bool {
+        match self.source_start.checked_add(self.range_length - 1) {
+            Some(end_of_mapping) => target >= self.source_start && target <= end_of_mapping,
             None => false,
         }
     }
 
-    fn get_destination(&self, target: u32) -> u32 {
+    fn get_destination_of_seed_number(&self, target: u64) -> u64 {
         let is_within_mapping = self.number_is_within_range(target);
 
         if !is_within_mapping {
             return target;
         }
 
-        let mapped_destination = self.destination_range_start + (target - self.source_range_start);
+        let mapped_destination = self.destination_start + (target - self.source_start);
         return mapped_destination;
+    }
+
+    fn process_seed_range(&self, range: SeedRange) -> MapProcessSeedRangeOutput {
+        let self_source_end = self.get_source_end();
+
+        let no_overlap_exists =
+            self_source_end < range.start || self.source_start > range.get_end();
+
+        if no_overlap_exists {
+            return MapProcessSeedRangeOutput::NoOverlap;
+        }
+
+        let overlap_starts_at = self.source_start.max(range.start);
+        let overlap_ends_at = self_source_end.min(range.get_end());
+        let overlap_length = overlap_ends_at - overlap_starts_at + 1;
+        let overlap_source_range = SeedRange {
+            start: overlap_starts_at,
+            length: overlap_length,
+        };
+        let overlap_destination_range = SeedRange {
+            start: self.apply_delta(overlap_starts_at),
+            length: overlap_length,
+        };
+
+        let remainder_opt = range.subtract(overlap_source_range);
+
+        match remainder_opt {
+            Some(remainder) => {
+                MapProcessSeedRangeOutput::PartialOverlap(overlap_destination_range, remainder)
+            }
+            _ => MapProcessSeedRangeOutput::CompleteOverlap(overlap_destination_range),
+        }
     }
 }
 
-fn get_destination_from_multiple_resource_maps(
-    resource_maps: &Vec<ResourceMap>,
-    original_destination: u32,
-) -> u32 {
-    let mut destination_history = vec![original_destination];
-    let mut final_destination = original_destination;
-
-    resource_maps.iter().for_each(|resource_map| {
-        let current_destination = resource_map.get_destination(original_destination);
-        destination_history.push(current_destination);
-
-        if current_destination != final_destination && current_destination != original_destination {
-            final_destination = current_destination
-        }
-    });
-
-    return final_destination;
+struct SeedMapSet {
+    maps: Vec<SeedMap>,
 }
 
-fn parse_seed_number_line(line: &str) -> Option<Vec<u32>> {
+impl SeedMapSet {
+    fn new(maps: Vec<SeedMap>) -> Self {
+        SeedMapSet { maps }
+    }
+
+    fn get_map_for_seed_number(&self, seed_number: u64) -> Option<&SeedMap> {
+        self.maps
+            .iter()
+            .rfind(|map| map.number_is_within_range(seed_number))
+    }
+
+    fn get_number_next_destination(&self, seed_number: u64) -> u64 {
+        match self.get_map_for_seed_number(seed_number) {
+            Some(map) => map.get_destination_of_seed_number(seed_number),
+            _ => seed_number,
+        }
+    }
+
+    fn pass_seed_range_through_maps(&self, range: SeedRange) -> Vec<SeedRange> {
+        let mut new_ranges: Vec<SeedRange> = vec![];
+        let mut current_range_opt: Option<SeedRange> = Some(range);
+
+        for map in self.maps.iter() {
+            if current_range_opt.is_none() {
+                break;
+            }
+            let current_range = current_range_opt.unwrap();
+
+            let process_output = map.process_seed_range(current_range);
+
+            match process_output {
+                MapProcessSeedRangeOutput::CompleteOverlap(new_range) => {
+                    new_ranges.push(new_range);
+                    current_range_opt = None;
+                }
+                MapProcessSeedRangeOutput::PartialOverlap(shifted, remainder) => {
+                    new_ranges.push(shifted);
+                    current_range_opt = Some(remainder);
+                }
+                MapProcessSeedRangeOutput::NoOverlap => {}
+            }
+        }
+
+        match current_range_opt {
+            Some(range) => new_ranges.push(range),
+            _ => {}
+        }
+
+        return new_ranges;
+    }
+}
+
+fn parse_seed_number_line(line: &str) -> Option<Vec<u64>> {
     let seed_number_line_pattern = Regex::new("^seeds: (.*)").expect("invalid regex");
 
     match seed_number_line_pattern.captures(line) {
@@ -77,7 +218,7 @@ fn parse_seed_number_line(line: &str) -> Option<Vec<u32>> {
                 .as_str()
                 .split(" ")
                 .map(|num_text| num_text.trim())
-                .map(|num_text| num_text.parse::<u32>().expect("invalid seed number"))
+                .map(|num_text| num_text.parse::<u64>().expect("invalid seed number"))
                 .collect()
         }),
         _ => None,
@@ -85,163 +226,128 @@ fn parse_seed_number_line(line: &str) -> Option<Vec<u32>> {
 }
 
 struct Almanac {
-    seed_numbers: Vec<u32>,
-    resource_map_sets: Vec<Vec<ResourceMap>>,
-    solved_seed_numbers: HashMap<u32, u32>, // for memoisation
+    map_sets: Vec<SeedMapSet>,
 }
 
 impl Almanac {
-    fn create(seed_numbers: Vec<u32>, resource_map_sets: Vec<Vec<ResourceMap>>) -> Self {
+    fn new(resource_map_sets: Vec<SeedMapSet>) -> Self {
         Almanac {
-            seed_numbers: seed_numbers,
-            resource_map_sets: resource_map_sets,
-            solved_seed_numbers: HashMap::new(),
+            map_sets: resource_map_sets,
         }
     }
 
-    fn get_seed_number_outputs(&mut self) -> Vec<u32> {
-        self.seed_numbers
+    fn get_location_for_seed_number(&self, seed_number: u64) -> u64 {
+        let location = &self
+            .map_sets
             .iter()
-            .map(
-                |seed_number| match self.solved_seed_numbers.get(seed_number) {
-                    Some(&already_solved) => {
-                        println!("Hit seed number cache: {}", already_solved);
-                        return already_solved;
-                    }
-                    _ => {
-                        let result = self.resource_map_sets.iter().fold(
-                            seed_number.clone(),
-                            |result, resource_map_set| {
-                                get_destination_from_multiple_resource_maps(
-                                    resource_map_set,
-                                    result,
-                                )
-                            },
-                        );
+            .fold(seed_number, |current_destination, map_set| {
+                map_set.get_number_next_destination(current_destination)
+            });
 
-                        self.solved_seed_numbers.insert(seed_number.clone(), result);
+        return location.clone();
+    }
 
-                        return result;
-                    }
-                },
-            )
-            .collect()
+    fn get_destination_ranges_for_seed_range(
+        &self,
+        seed_range: SeedRange,
+    ) -> (Vec<SeedRange>, SeedRange) {
+        (
+            self.map_sets
+                .iter()
+                .fold(vec![seed_range], |ranges, map_set| {
+                    ranges
+                        .iter()
+                        .flat_map(|&range| map_set.pass_seed_range_through_maps(range))
+                        .collect()
+                }),
+            seed_range,
+        )
     }
 }
 
-struct Range {
-    start: u32,
-    size: u32,
-}
-
-impl Range {
-    fn map<F, T>(&self, mapper: F) -> Vec<T>
-    where
-        F: Fn(u32) -> T,
-        T: Clone,
-    {
-        let mut results: Vec<T> = vec![];
-
-        for offset in 0..self.size {
-            results.push(mapper(self.start + offset));
-        }
-
-        return results;
-    }
-}
-
-fn parse_seed_number_range((start_number, size): (u32, u32)) -> Vec<u32> {
-    if size == 0 {
-        return vec![];
-    }
-    if size == 1 {
-        return vec![start_number];
-    }
-    let range: Vec<u32> = (start_number..(start_number + size - 1)).collect();
-    return range;
-}
-
-pub fn part_one(input: &str) -> Option<u32> {
+pub fn part_one(input: &str) -> Option<u64> {
     let label_line_pattern = Regex::new("^.*:$").expect("invalid_regex");
 
     let lines: Vec<&str> = input.lines().collect();
 
-    let seed_numbers: Vec<u32> = parse_seed_number_line(lines[0])
+    let seed_numbers: Vec<u64> = parse_seed_number_line(lines[0])
         .expect("Failed to read seed numbers from first input line");
 
     let grouped_lines = utils::split_vector(lines, |line| label_line_pattern.is_match(line));
-    let resource_map_sets: Vec<Vec<ResourceMap>> = grouped_lines
+    let resource_map_sets: Vec<SeedMapSet> = grouped_lines
         .iter()
         .map(|line_group| {
             line_group
                 .iter()
-                .filter_map(|line| ResourceMap::from_line(line))
-                .collect::<Vec<ResourceMap>>()
+                .filter_map(|line| SeedMap::from_line(line))
+                .collect::<Vec<SeedMap>>()
         })
         .filter(|resource_map_group| resource_map_group.len() > 0)
+        .map(SeedMapSet::new)
         .collect();
 
-    let mut almanac = Almanac::create(seed_numbers, resource_map_sets);
+    let almanac = Almanac::new(resource_map_sets);
 
-    let results = almanac.get_seed_number_outputs();
+    let results: Vec<u64> = seed_numbers
+        .iter()
+        .map(|&seed_number| almanac.get_location_for_seed_number(seed_number))
+        .collect();
 
     let lowest_result = results
         .iter()
-        .fold(u32::MAX, |min_result, &current_result| {
+        .fold(u64::MAX, |min_result, &current_result| {
             min_result.min(current_result)
         });
 
     Some(lowest_result)
 }
 
-pub fn part_two(input: &str) -> Option<u32> {
+pub fn part_two(input: &str) -> Option<u64> {
     let label_line_pattern = Regex::new("^.*:$").expect("invalid_regex");
 
     let lines: Vec<&str> = input.lines().collect();
 
-    let base_seed_numbers: Vec<u32> = parse_seed_number_line(lines[0])
+    let base_seed_numbers: Vec<u64> = parse_seed_number_line(lines[0])
         .expect("Failed to read seed numbers from first input line");
 
-    let seed_ranges: Vec<Range> = base_seed_numbers
+    let seed_ranges: Vec<SeedRange> = base_seed_numbers
         .chunks(2)
-        .map(|seed_range| Range {
+        .map(|seed_range| SeedRange {
             start: seed_range[0],
-            size: seed_range[1],
+            length: seed_range[1],
         })
         .collect();
 
     let grouped_lines = utils::split_vector(lines, |line| label_line_pattern.is_match(line));
-    let resource_map_sets: Vec<Vec<ResourceMap>> = grouped_lines
+    let seed_map_sets: Vec<SeedMapSet> = grouped_lines
         .iter()
         .map(|line_group| {
             line_group
                 .iter()
-                .filter_map(|line| ResourceMap::from_line(line))
-                .collect::<Vec<ResourceMap>>()
+                .filter_map(|line| SeedMap::from_line(line))
+                .collect::<Vec<SeedMap>>()
         })
         .filter(|resource_map_group| resource_map_group.len() > 0)
+        .map(SeedMapSet::new)
         .collect();
 
-    let results: Vec<u32> = seed_ranges
+    let almanac = Almanac::new(seed_map_sets);
+
+    let final_ranges_groups: Vec<_> = seed_ranges
         .iter()
-        .flat_map(|seed_range| {
-            seed_range.map(|seed_number| {
-                resource_map_sets
-                    .iter()
-                    .fold(seed_number, |destination, resource_maps| {
-                        get_destination_from_multiple_resource_maps(resource_maps, destination)
-                    })
-            })
-        })
+        .map(|&range| almanac.get_destination_ranges_for_seed_range(range))
         .collect();
 
-    let lowest_result = results
-        .iter()
-        .fold(u32::MAX, |min_result, &current_result| {
-            min_result.min(current_result)
-        });
+    let final_ranges: Vec<SeedRange> = final_ranges_groups
+        .into_iter()
+        .flat_map(|(range, _)| range)
+        .collect();
 
-    Some(lowest_result)
+    let smallest_range_start: u64 = final_ranges
+        .iter()
+        .fold(u64::MAX, |min, current| min.min(current.start));
+
+    Some(smallest_range_start)
 }
 
 #[cfg(test)]
