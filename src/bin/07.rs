@@ -4,6 +4,12 @@ use itertools::Itertools;
 
 advent_of_code::solution!(7);
 
+fn assert_card_hand_len(cards_len: usize) {
+    if cards_len < 4 || cards_len > 5 {
+        panic!("Card hands must consist of 4 or 5 cards")
+    }
+}
+
 #[derive(Hash, PartialEq, Eq, Clone, Copy)]
 enum Card {
     Two = 2,
@@ -40,6 +46,13 @@ fn parse_card_value(character: char) -> Card {
     }
 }
 
+fn get_card_strength(card: Card, use_joker_rule: bool) -> isize {
+    match (card, use_joker_rule) {
+        (Card::J, true) => 0,
+        (_, _) => (card as isize) + 1,
+    }
+}
+
 #[derive(Copy, Clone, PartialEq)]
 #[repr(u32)]
 enum HandType {
@@ -52,11 +65,7 @@ enum HandType {
     HighCard = 0,
 }
 
-fn parse_hand_type_from_cards(cards: &Vec<Card>) -> HandType {
-    if cards.len() != 5 {
-        panic!("A hand of cards have precisely 5 cards")
-    }
-
+fn parse_hand_type_from_cards(cards: Vec<Card>) -> HandType {
     let sorted_card_counts: Vec<_> = cards
         .iter()
         .counts()
@@ -73,70 +82,34 @@ fn parse_hand_type_from_cards(cards: &Vec<Card>) -> HandType {
         sorted_card_counts.get(3),
         sorted_card_counts.get(4),
     ) {
-        (Some(5), _, _, _, _) => HandType::FiveOfKind,
-        (Some(4), _, _, _, _) => HandType::FourOfKind,
-        (Some(3), Some(2), _, _, _) => HandType::FullHouse,
-        (Some(3), Some(1), Some(1), _, _) => HandType::ThreeOfKind,
-        (Some(2), Some(2), Some(1), _, _) => HandType::TwoPair,
-        (Some(2), Some(1), Some(1), Some(1), _) => HandType::OnePair,
+        (_, None, None, None, None) => HandType::FiveOfKind,
+        (Some(_), Some(1), None, None, None) => HandType::FourOfKind,
+        (Some(_), Some(2), None, None, None) => HandType::FullHouse,
+        (Some(_), Some(1), Some(1), None, None) => HandType::ThreeOfKind,
+        (Some(_), Some(2), Some(1), None, None) => HandType::TwoPair,
+        (Some(_), Some(1), Some(1), Some(1), None) => HandType::OnePair,
         (Some(1), Some(1), Some(1), Some(1), Some(1)) => HandType::HighCard,
-        _ => panic!("impossible result (card card counts)"),
+        _ => panic!("waa"),
     }
-
-    // return match number_of_unique_cards {
-    //     1 => HandType::FiveOfKind,
-    //     2 => {
-    //         match (
-    //             sorted_card_counts[0],
-    //             sorted_card_counts[1],
-    //             sorted_card_counts.get(1),
-    //         ) {
-    //             (4, _, _) => HandType::FourOfKind,
-    //             (3, 2, _) => HandType::ThreeOfKind,
-    //             (3, 1, Some(1)) => HandType::FullHouse,
-    //             _ => panic!("impossible result"),
-    //         }
-    //     }
-    //     3 => {
-    //         let sorted_card_counts: Vec<(_, _)> = cards
-    //             .iter()
-    //             .counts()
-    //             .drain()
-    //             .sorted_by(|&a, &b| b.1.cmp(&a.1))
-    //             .collect();
-
-    //         match (
-    //             sorted_card_counts[0],
-    //             sorted_card_counts[1],
-    //             sorted_card_counts[2],
-    //         ) {
-    //             ((&pair_one, 2), (&pair_two, 2), (_, 1)) => HandType::TwoPair,
-    //             ((&set_of_3, 3), (_, 1), (_, 1)) => HandType::ThreeOfKind,
-    //             _ => panic!("impossible result (more unique cards than previously determined)"),
-    //         }
-    //     }
-    //     4 => {
-    //         let sorted_card_counts: Vec<(_, _)> = cards.iter().counts().drain().collect();
-
-    //         HandType::OnePair
-    //     }
-    //     5 => HandType::HighCard,
-    //     _ => panic!("impossible result (more than 5 unique cards)"),
-    // };
 }
 
-enum HandComparisonResult {
-    FirstWins,
-    SecondWins,
+fn filter_out_jokers(cards: &Vec<Card>, do_it: bool) -> Vec<Card> {
+    if !do_it {
+        return cards.clone();
+    }
+    return cards
+        .clone()
+        .into_iter()
+        .filter(|&card| card != Card::J)
+        .collect();
 }
 
-fn compare_hands(hand_1: &Vec<Card>, hand_2: &Vec<Card>) -> Ordering {
-    if hand_1.len() != 5 || hand_2.len() != 5 {
-        panic!("A hand must consist of 5 cards")
-    }
+fn compare_hands(hand_1: &Vec<Card>, hand_2: &Vec<Card>, use_joker_rule: bool) -> Ordering {
+    assert_card_hand_len(hand_1.len());
+    assert_card_hand_len(hand_2.len());
 
-    let hand_type_1 = parse_hand_type_from_cards(hand_1);
-    let hand_type_2 = parse_hand_type_from_cards(hand_2);
+    let hand_type_1 = parse_hand_type_from_cards(filter_out_jokers(hand_1, use_joker_rule));
+    let hand_type_2 = parse_hand_type_from_cards(filter_out_jokers(hand_2, use_joker_rule));
 
     if hand_type_1 != hand_type_2 {
         return Ord::cmp(&(hand_type_1 as isize), &(hand_type_2 as isize));
@@ -147,14 +120,17 @@ fn compare_hands(hand_1: &Vec<Card>, hand_2: &Vec<Card>) -> Ordering {
         let card_2 = hand_2[card_index].clone();
 
         if card_1 != card_2 {
-            return Ord::cmp(&(card_1 as isize), &(card_2 as isize));
+            return Ord::cmp(
+                &get_card_strength(card_1, use_joker_rule),
+                &get_card_strength(card_2, use_joker_rule),
+            );
         }
     }
 
     panic!("Unable to determine definitive ranking")
 }
 
-fn parse_line(line: &str) -> (Vec<Card>, u32) {
+fn parse_part_one_line(line: &str) -> (Vec<Card>, u32) {
     let (card_characters, bid_number_text): (&str, &str) =
         line.split_once(" ").expect("Line should match structure");
 
@@ -171,10 +147,13 @@ fn parse_line(line: &str) -> (Vec<Card>, u32) {
 }
 
 pub fn part_one(input: &str) -> Option<u32> {
-    let data: Vec<(_, _)> = input.lines().map(|line| parse_line(line)).collect();
+    let data: Vec<(_, _)> = input
+        .lines()
+        .map(|line| parse_part_one_line(line))
+        .collect();
     let sorted_data: Vec<&(_, _)> = data
         .iter()
-        .sorted_by(|a, b| compare_hands(&a.0, &b.0))
+        .sorted_by(|a, b| compare_hands(&a.0, &b.0, false))
         .collect();
 
     let total_winnings: u32 = sorted_data
@@ -192,7 +171,27 @@ pub fn part_one(input: &str) -> Option<u32> {
 }
 
 pub fn part_two(input: &str) -> Option<u32> {
-    None
+    let data: Vec<(_, _)> = input
+        .lines()
+        .map(|line| parse_part_one_line(line))
+        .collect();
+    let sorted_data: Vec<&(_, _)> = data
+        .iter()
+        .sorted_by(|a, b| compare_hands(&a.0, &b.0, true))
+        .collect();
+
+    let total_winnings: u32 = sorted_data
+        .iter()
+        .enumerate()
+        .map(|(rank_index, (_, bid))| {
+            u32::try_from(rank_index + 1)
+                .unwrap()
+                .checked_mul(bid.clone())
+                .unwrap()
+        })
+        .sum();
+
+    Some(total_winnings)
 }
 
 #[cfg(test)]
@@ -209,13 +208,14 @@ mod tests {
     fn test_part_one_actual() {
         let result = part_one(&advent_of_code::template::read_file("inputs", DAY));
         assert!(result.is_some());
+        assert_eq!(result, Some(250254244));
         println!("{}", result.unwrap());
     }
 
     #[test]
     fn test_part_two_example() {
         let result = part_two(&advent_of_code::template::read_file("examples", DAY));
-        assert_eq!(result, None);
+        assert_eq!(result, Some(5905));
     }
 
     #[test]
