@@ -49,8 +49,18 @@ pub fn part_one(input: &str) -> Option<i64> {
     return Some(sum);
 }
 
-pub fn part_two(_input: &str) -> Option<i64> {
-    None
+fn predict_previous_value(sequence: Vec<i64>) -> i64 {
+    let reversed: Vec<i64> = sequence.into_iter().rev().collect();
+
+    return predict_next_value(reversed);
+}
+
+pub fn part_two(input: &str) -> Option<i64> {
+    let sequences: Vec<Vec<i64>> = input.lines().map(parse_line).collect();
+    let previous_values: Vec<i64> = sequences.into_iter().map(predict_previous_value).collect();
+    let sum: i64 = previous_values.iter().sum();
+
+    return Some(sum);
 }
 
 #[cfg(test)]
@@ -73,7 +83,7 @@ mod tests {
     #[test]
     fn test_part_two_example() {
         let result = part_two(&advent_of_code::template::read_file("examples", DAY));
-        assert_eq!(result, None);
+        assert_eq!(result, Some(2));
     }
 
     #[test]
