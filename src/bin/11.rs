@@ -28,13 +28,12 @@ fn parse_tile_character(character: char) -> TileCategory {
 }
 
 #[derive(Copy, Clone)]
-struct MapTile {
-    category: TileCategory,
-    x: usize,
-    y: usize,
+struct Point {
+    x: u64,
+    y: u64,
 }
 
-fn parse_part_one_input_to_galaxies(input: &str) -> Vec<MapTile> {
+fn parse_input_to_galaxy_points(input: &str, empty_areas_count_as: u64) -> Vec<Point> {
     let base_tile_category_grid: Vec<Vec<TileCategory>> = input
         .lines()
         .map(|line| line.chars().map(parse_tile_character).collect())
@@ -58,70 +57,98 @@ fn parse_part_one_input_to_galaxies(input: &str) -> Vec<MapTile> {
         }
     }
 
-    let mut extra_col_offset: usize = 0;
-    let expanded_tile_category_grid: Vec<Vec<TileCategory>> = base_tile_category_grid
-        .into_iter()
-        .flat_map(|row| {
+    let empty_rows: Vec<usize> = base_tile_category_grid
+        .iter()
+        .enumerate()
+        .filter_map(|(row_index, row)| {
             return if row.contains(&TileCategory::Galaxy) {
-                vec![row]
+                None
             } else {
-                vec![row.clone(), row]
+                Some(row_index)
             };
-        })
-        .map(|row| {
-            row.into_iter()
-                .enumerate()
-                .flat_map(|(col_index, tile_category)| {
-                    return if empty_cols.contains(&(col_index + extra_col_offset)) {
-                        // extra_col_offset += 1;
-                        // IF THIS WORKS<, REMOVE `extra_col_offset` ENTIRELY
-                        vec![tile_category, tile_category]
-                    } else {
-                        vec![tile_category]
-                    };
-                })
-                .collect()
         })
         .collect();
 
     let mut double_enumerated_grid: Vec<(usize, usize, TileCategory)> = vec![];
-    for (row_index, row) in expanded_tile_category_grid.iter().enumerate() {
+    for (row_index, row) in base_tile_category_grid.iter().enumerate() {
         for (col_index, &tile_category) in row.iter().enumerate() {
             double_enumerated_grid.push((col_index, row_index, tile_category));
         }
     }
 
-    return double_enumerated_grid
+    // Instead of ever inserting the extra columns and rows into the grid, instead
+    // we just offset each point by the number of extra rows/columns they would be
+    // affected by
+    let points: Vec<Point> = double_enumerated_grid
         .into_iter()
         .filter(|(_, _, category)| category == &TileCategory::Galaxy)
-        .map(|(x, y, category)| MapTile { category, x, y })
+        .map(|(x, y, _)| {
+            let after_num_empty_rows = empty_rows
+                .clone()
+                .into_iter()
+                .filter(|&row_index| row_index < y)
+                .collect::<Vec<_>>()
+                .len();
+            let after_num_empty_cols = empty_cols
+                .clone()
+                .into_iter()
+                .filter(|&col_index| col_index < x)
+                .collect::<Vec<_>>()
+                .len();
+            let y_adjustment =
+                u64::try_from(after_num_empty_rows).unwrap() * (empty_areas_count_as - 1);
+            let x_adjustment =
+                u64::try_from(after_num_empty_cols).unwrap() * (empty_areas_count_as - 1);
+
+            let result = Point {
+                x: u64::try_from(x).unwrap() + x_adjustment,
+                y: u64::try_from(y).unwrap() + y_adjustment,
+            };
+
+            println!();
+
+            return result;
+        })
         .collect();
+
+    return points;
 }
 
-fn get_distance_between_tiles(tile_a: MapTile, tile_b: MapTile) -> usize {
+fn get_distance_between_tiles(tile_a: Point, tile_b: Point) -> u64 {
     let x_diff = tile_a.x.abs_diff(tile_b.x);
     let y_diff = tile_a.y.abs_diff(tile_b.y);
 
     return x_diff + y_diff;
 }
 
-pub fn part_one(input: &str) -> Option<u32> {
-    let galaxies = parse_part_one_input_to_galaxies(input);
+pub fn part_one(input: &str) -> Option<u64> {
+    let galaxies = parse_input_to_galaxy_points(input, 2);
     let galaxy_pairs = pairs(galaxies);
-    let distances: Vec<usize> = galaxy_pairs
+    let distances: Vec<u64> = galaxy_pairs
         .into_iter()
         .map(|(a, b)| get_distance_between_tiles(a, b))
         .collect();
 
-    let sum = distances.into_iter().fold(0 as u32, |total, current| {
-        total + u32::try_from(current).unwrap()
+    let sum = distances.into_iter().fold(0 as u64, |total, current| {
+        total + u64::try_from(current).unwrap()
     });
 
     return Some(sum);
 }
 
-pub fn part_two(_input: &str) -> Option<u32> {
-    return None;
+pub fn part_two(input: &str) -> Option<u64> {
+    let galaxies = parse_input_to_galaxy_points(input, 1000000);
+    let galaxy_pairs = pairs(galaxies);
+    let distances: Vec<u64> = galaxy_pairs
+        .into_iter()
+        .map(|(a, b)| get_distance_between_tiles(a, b))
+        .collect();
+
+    let sum = distances.into_iter().fold(0 as u64, |total, current| {
+        total + u64::try_from(current).unwrap()
+    });
+
+    return Some(sum);
 }
 
 #[cfg(test)]
@@ -141,11 +168,7 @@ mod tests {
         println!("{}", result.unwrap());
     }
 
-    #[test]
-    fn test_part_two_example() {
-        let result = part_two(&advent_of_code::template::read_file("examples", DAY));
-        assert_eq!(result, None);
-    }
+    // No part 2 example is provided
 
     #[test]
     fn run_part_two_actual() {
